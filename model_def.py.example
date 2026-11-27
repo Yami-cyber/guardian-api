@@ -1,0 +1,77 @@
+"""Model definition for the Guardian bullying classifier.
+
+Architecture: IndoBERTweet base -> BiLSTM -> Linear (2-class)
+
+Match this file to your training notebook. Rename to model_def.py
+and ensure it is importable when running the backend with
+CLASSIFIER_BACKEND=torch.
+"""
+
+import torch
+import torch.nn as nn
+from transformers import AutoModel
+
+
+class IndoBERTweetClassifier(nn.Module):
+    """IndoBERTweet + BiLSTM binary classifier.
+
+    Parameters match the defaults used during training -- adjust if your
+    training notebook uses different values.
+    """
+
+    def __init__(
+        self,
+        pretrained_model: str = "indolem/indobertweet-base-uncased",
+        lstm_hidden: int = 128,
+        lstm_layers: int = 1,
+        dropout: float = 0.3,
+        num_classes: int = 2,
+    ) -> None:
+        super().__init__()
+
+        self.bert = AutoModel.from_pretrained(pretrained_model)
+        bert_hidden = self.bert.config.hidden_size  # typically 768
+
+        self.lstm = nn.LSTM(
+            input_size=bert_hidden,
+            hidden_size=lstm_hidden,
+            num_layers=lstm_layers,
+            batch_first=True,
+            bidirectional=True,
+            dropout=dropout if lstm_layers > 1 else 0.0,
+        )
+
+        self.dropout = nn.Dropout(dropout)
+        # BiLSTM outputs 2 * lstm_hidden
+        self.classifier = nn.Linear(lstm_hidden * 2, num_classes)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return raw logits of shape (batch, num_classes).
+
+        Args:
+            input_ids:      (batch, seq_len)
+            attention_mask:  (batch, seq_len)
+
+        Returns:
+            Logits tensor of shape (batch, 2). Apply softmax externally.
+        """
+        # BERT encoder
+        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        sequence_output = outputs.last_hidden_state  # (batch, seq, hidden)
+
+        # BiLSTM
+        lstm_out, _ = self.lstm(sequence_output)  # (batch, seq, 2*lstm_hidden)
+
+        # Take the output at the last *valid* token for each sample.
+        lengths = attention_mask.sum(dim=1) - 1  # index of last real token
+        batch_idx = torch.arange(lstm_out.size(0), device=lstm_out.device)
+        pooled = lstm_out[batch_idx, lengths]  # (batch, 2*lstm_hidden)
+
+        pooled = self.dropout(pooled)
+        logits = self.classifier(pooled)  # (batch, num_classes)
+
+        return logits
