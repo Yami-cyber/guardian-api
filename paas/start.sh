@@ -3,9 +3,11 @@
 set -e
 
 export PORT="${PORT:-8000}"
-export HF_HOME="${HF_HOME:-/app/.hf-cache}"
-export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export HF_HOME="${HF_HOME:-/tmp/hf-cache}"
 export MODEL_FILE="${MODEL_FILE:-best_weights.pt}"
+export MODEL_DIR="${MODEL_DIR:-/tmp/models}"
+# Model belum ada saat start; dimuat saat request klasifikasi pertama setelah unduhan selesai.
+export PRELOAD_MODEL="${PRELOAD_MODEL:-false}"
 
 # Kunci Firebase dikirim sebagai secret env berisi JSON (platform tidak memasang file rahasia).
 if [ -n "$FIREBASE_CREDENTIALS_JSON" ] && [ -z "$FIREBASE_CREDENTIALS_PATH" ]; then
@@ -15,19 +17,13 @@ if [ -n "$FIREBASE_CREDENTIALS_JSON" ] && [ -z "$FIREBASE_CREDENTIALS_PATH" ]; t
     export FIREBASE_CREDENTIALS_PATH=/tmp/firebase-sa.json
 fi
 
-if [ -f "/app/models/$MODEL_FILE" ]; then
-    export MODEL_DIR=/app/models
-    export PRELOAD_MODEL="${PRELOAD_MODEL:-true}"
-else
-    # Bobot tidak ikut image (repo HF gated): unduh di latar belakang supaya /health langsung menjawab.
-    # Model dimuat saat request klasifikasi pertama setelah unduhan selesai.
-    export MODEL_DIR=/tmp/models
-    export PRELOAD_MODEL=false
-    if [ ! -f "$MODEL_DIR/$MODEL_FILE" ]; then
-        (HF_HUB_OFFLINE=0 python paas/download_weights.py "$MODEL_DIR.part" \
-            && mkdir -p "$MODEL_DIR" && mv "$MODEL_DIR.part/$MODEL_FILE" "$MODEL_DIR/$MODEL_FILE" \
-            || echo "Unduh bobot gagal: isi secret env HF_TOKEN." >&2) &
-    fi
+# Unduh di latar belakang supaya /health langsung menjawab: model dasar IndoBERTweet lalu bobot fine-tune.
+if [ ! -f "$MODEL_DIR/$MODEL_FILE" ]; then
+    (python -c "from huggingface_hub import snapshot_download; snapshot_download('indolem/indobertweet-base-uncased')" \
+        && python paas/download_weights.py "$MODEL_DIR.part" \
+        && mkdir -p "$MODEL_DIR" && mv "$MODEL_DIR.part/$MODEL_FILE" "$MODEL_DIR/$MODEL_FILE" \
+        && echo "Model siap di $MODEL_DIR/$MODEL_FILE." \
+        || echo "Unduh model gagal: periksa secret env HF_TOKEN." >&2) &
 fi
 
 exec gunicorn -c gunicorn.conf.py "app:create_app()"

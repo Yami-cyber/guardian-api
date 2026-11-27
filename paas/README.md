@@ -17,5 +17,6 @@ Secret env (diketik admin di halaman komponen, tidak pernah di-commit):
 | `GEMINI_API_KEY` | kunci Gemini (tanpa ini penjelasan memakai template bawaan) |
 | `FIREBASE_CREDENTIALS_JSON` | isi lengkap `serviceAccountKey.json` (tanpa ini endpoint selain `/health` gagal) |
 
-Bobot `best_weights.pt` diunduh di latar belakang saat container start, jadi `/health` langsung menjawab;
+Model dasar IndoBERTweet dan bobot `best_weights.pt` diunduh di latar belakang saat container start
+(tidak masuk image: torch + model membuat Kaniko kehabisan memori), jadi `/health` langsung menjawab;
 model dimuat saat request klasifikasi pertama setelah unduhan selesai.
